@@ -20,9 +20,7 @@ BEGIN
         PromptName nvarchar(200) NOT NULL,
         PromptType varchar(30) NOT NULL,
         VersionNumber int NOT NULL,
-
         PromptTemplate nvarchar(max) NOT NULL,
-
         EffectiveFrom datetime2(3) NOT NULL,
         EffectiveTo datetime2(3) NULL,
         IsActive bit NOT NULL
