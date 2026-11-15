@@ -17,4 +17,9 @@ That distinction matters because prompts, responses, retrieved context, and tool
 
 > Auditability does not require blindly retaining everything.
 
-Future architecture will be added to the repository only as the corresponding articles are published.
+## Architecture and Documentation
+
+- [Reference Architecture](docs/ARCHITECTURE.md) — Architectural principles, components, trust boundaries, runtime enforcement, and demonstrated capabilities.
+- [Production Readiness Considerations](docs/PRODUCTION_READINESS.md) — Deployment requirements, known limitations, security considerations, and production acceptance criteria.
+
+AIAF is a reference architecture and validated development proof of concept, not a turnkey production security product.
