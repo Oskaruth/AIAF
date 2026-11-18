@@ -1,0 +1,2 @@
+CREATE SCHEMA [acme] AUTHORIZATION [dbo]
+GO

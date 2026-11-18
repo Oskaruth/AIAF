@@ -1,0 +1,2 @@
+CREATE SCHEMA [aiaf_tool] AUTHORIZATION [dbo]
+GO
