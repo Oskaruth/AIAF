@@ -5,8 +5,12 @@ SET QUOTED_IDENTIFIER ON
 GO
 
 
-CREATE   PROCEDURE aiaf.usp_CompleteInteraction
-    @InteractionId bigint
+
+
+
+CREATE OR ALTER   PROCEDURE [aiaf].[usp_CompleteInteraction]
+    @InteractionId bigint,
+    @ProcessingFailed bit = 0
 AS
 BEGIN
 
@@ -16,6 +20,13 @@ BEGIN
     IF @@TRANCOUNT <> 0
         THROW 52100,
             'Caller-owned transactions are not supported.', 1;
+
+    IF @ProcessingFailed = 1
+    BEGIN
+        EXEC aiaf.usp_FailInteraction @InteractionId = @InteractionId;
+
+        RETURN;
+    END;
 
     DECLARE
         @InteractionStatus varchar(30),
@@ -323,7 +334,4 @@ BEGIN
 
 END;
 
-GO
-
-ALTER AUTHORIZATION ON [aiaf].[usp_CompleteInteraction] TO  SCHEMA OWNER
 GO

@@ -357,6 +357,7 @@ def _process_request(
     execution_environment
 ):
     tool_result = None
+    interaction_id = None
 
     def finalize_request(interaction_id):
         completion = complete_interaction(cursor, interaction_id)
@@ -653,6 +654,32 @@ def _process_request(
         )
 
         return response
+
+    except Exception:
+        if interaction_id is not None:
+            try:
+                completion = complete_interaction(
+                    cursor,
+                    interaction_id,
+                    processing_failed=True
+                )
+
+                logger.warning(
+                    "Interaction failure finalized: "
+                    "interaction_id=%s status=%s",
+                    interaction_id,
+                    completion["InteractionStatus"]
+                )
+
+            except Exception:
+                logger.exception(
+                    "Interaction failure finalization failed: "
+                    "interaction_id=%s",
+                    interaction_id
+                )
+
+        raise
+
     finally:
         if isinstance(tool_result, dict):
             data = tool_result.get("Data")

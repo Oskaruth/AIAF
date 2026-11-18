@@ -14,7 +14,7 @@ MODEL_NAME = os.getenv(
 )
 
 MODEL_PROVIDER = "OLLAMA"
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 
 OLLAMA_URL = os.getenv(
     "AIAF_OLLAMA_URL",
@@ -62,7 +62,17 @@ TOOL_SCHEMA = {
     "additionalProperties": False
 }
 
-SYSTEM_PROMPT = """
+DEFAULT_CUSTOMER_DIRECTORY = """\
+CUST-1001: Northwind Industrial
+CUST-1002: Contoso Equipment
+CUST-1003: Fabrikam Logistics"""
+
+CUSTOMER_DIRECTORY = os.getenv(
+    "AIAF_CUSTOMER_DIRECTORY",
+    DEFAULT_CUSTOMER_DIRECTORY
+)
+
+SYSTEM_PROMPT = f"""
 You are an Accounts Receivable assistant.
 
 Your responsibility is to interpret a user request
@@ -77,9 +87,7 @@ disputed invoice information.
 
 Available synthetic customer directory:
 
-CUST-1001: Northwind Industrial
-CUST-1002: Contoso Equipment
-CUST-1003: Fabrikam Logistics
+{CUSTOMER_DIRECTORY}
 
 Rules:
 
