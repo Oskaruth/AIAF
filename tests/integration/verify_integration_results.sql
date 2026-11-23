@@ -1,6 +1,6 @@
 /*  AI Interaction Audit Framework (AIAF)
 
-    Independent integration test verification
+    Independent integration test verification — version 2 (17 scenarios)
 
     Purpose:
         Verify persisted evidence against the expected
@@ -13,9 +13,17 @@
 
     Execute against the database used by the test runner.   */
 
+USE [AIAF_IntegrationTest];
+GO
 SET NOCOUNT ON;
 
-DECLARE @RunId varchar(36) = NULL;
+-- Change this identifier for each new Python integration run.
+DECLARE @RunId UNIQUEIDENTIFIER = 'c0d82c26-e62c-4e49-9e16-955beab55dc1';
+
+IF DB_NAME() <> N'AIAF_IntegrationTest'
+    THROW 52501, 'Wrong database: independent verification requires AIAF_IntegrationTest.', 1;
+IF @RunId IS NULL
+    THROW 52502, 'Specify a non-null integration run ID.', 1;
 
 DROP TABLE IF EXISTS #ExpectedResults;
 
@@ -141,7 +149,38 @@ VALUES
     0, NULL,
     0, NULL, NULL,
     NULL, NULL,
-    0, 0, 2     );
+    0, 0, 2     ),
+(   'AUDIT_WRITE_FAILURE',
+    'FAILED', 'PROCESSING_EXCEPTION', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', NULL,
+    1, 'GetCustomerBalance', 1, 'ALLOWED', 'CUSTOMER_READ_AUTHORIZED',
+    'SUCCEEDED', 1, 0, 0, 7 ),
+(   'EXPIRED_CUSTOMER_ACCESS',
+    'BLOCKED', 'TOOL_AUTHORIZATION_DENIED', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', NULL,
+    1, 'GetCustomerBalance', 1, 'DENIED', 'CUSTOMER_ACCESS_DENIED',
+    'NOT_EXECUTED', 0, 0, 0, 7 ),
+(   'MALFORMED_MODEL_JSON',
+    'FAILED', 'MODEL_RESPONSE_INVALID', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', 'INVALID_MODEL_OUTPUT',
+    0, NULL, 0, NULL, NULL, NULL, NULL, 0, 0, 5 ),
+(   'UNSUPPORTED_MODEL_TOOL',
+    'FAILED', 'MODEL_RESPONSE_INVALID', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', 'INVALID_MODEL_OUTPUT',
+    0, NULL, 0, NULL, NULL, NULL, NULL, 0, 0, 5 ),
+(   'MISSING_MODEL_ARGUMENT',
+    'FAILED', 'MODEL_RESPONSE_INVALID', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', 'INVALID_MODEL_OUTPUT',
+    0, NULL, 0, NULL, NULL, NULL, NULL, 0, 0, 5 ),
+(   'PROMPT_INJECTION',
+    'FAILED', 'MODEL_RESPONSE_INVALID', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', 'INVALID_MODEL_OUTPUT',
+    0, NULL, 0, NULL, NULL, NULL, NULL, 0, 0, 5 ),
+(   'PROMPT_INJECTION_AUTHORIZATION',
+    'BLOCKED', 'TOOL_AUTHORIZATION_DENIED', 'ALLOWED',
+    3, 0, 1, 'SUCCEEDED', NULL,
+    1, 'GetCustomerBalance', 1, 'DENIED', 'CUSTOMER_ACCESS_DENIED',
+    'NOT_EXECUTED', 0, 0, 0, 7 );
 
 SELECT *
 FROM #ExpectedResults
@@ -167,7 +206,7 @@ DECLARE @RunPrefix VARCHAR(100);
 
 SET @RunPrefix = CONCAT(
     'AIAF_INTEGRATION|',
-    LOWER(CONVERT(VARCHAR(36), @RunId)),
+    CONVERT(VARCHAR(36), @RunId),
     '|'
 );
 
@@ -586,6 +625,12 @@ WHERE NOT EXISTS
     WHERE E.ScenarioCode = A.ScenarioCode
 );
 
+INSERT INTO #VerificationFailures
+(ScenarioCode, InteractionId, AssertionCode, ExpectedValue, ActualValue)
+SELECT 'RUN_TOTAL', NULL, 'TOTAL_INTERACTIONS', '17', CONVERT(NVARCHAR(20),COUNT(*))
+FROM #RunInteractions
+HAVING COUNT(*) <> 17;
+
 /*
     C.2: Core evidence assertions
 */
@@ -691,6 +736,35 @@ CROSS APPLY
 WHERE C.ExpectedValue IS DISTINCT FROM C.ActualValue;
 
 /*
+    C.2a: Explicit fail-closed checks, independent of the expected matrix.
+    A denied tool must never report execution or return data.
+*/
+INSERT INTO #VerificationFailures
+(ScenarioCode, InteractionId, AssertionCode, ExpectedValue, ActualValue)
+SELECT A.ScenarioCode, A.InteractionId,
+       'DENIED_TOOL_MUST_NOT_EXECUTE',
+       'NOT_EXECUTED; RowsReturned=0',
+       CONCAT(COALESCE(A.ToolExecutionStatus,'NULL'),
+              '; RowsReturned=', COALESCE(CONVERT(VARCHAR(30),A.RowsReturned),'NULL'))
+FROM #ActualResults AS A
+WHERE A.ToolAuthorizationDecision = 'DENIED'
+  AND (A.ToolExecutionStatus IS DISTINCT FROM 'NOT_EXECUTED'
+       OR A.RowsReturned IS DISTINCT FROM CONVERT(BIGINT,0));
+
+/* Governance denial must prevent downstream model/tool execution. */
+INSERT INTO #VerificationFailures
+(ScenarioCode, InteractionId, AssertionCode, ExpectedValue, ActualValue)
+SELECT A.ScenarioCode, A.InteractionId,
+       'GOVERNANCE_DENIAL_MUST_SHORT_CIRCUIT',
+       'ModelExecutions=0; ModelToolRequests=0; ToolCalls=0',
+       CONCAT('ModelExecutions=', A.ModelExecutions,
+              '; ModelToolRequests=', A.ModelToolRequests,
+              '; ToolCalls=', A.ToolCalls)
+FROM #ActualResults AS A
+WHERE A.GovernanceDecision = 'DENIED'
+  AND (A.ModelExecutions <> 0 OR A.ModelToolRequests <> 0 OR A.ToolCalls <> 0);
+
+/*
     C.3: Additional security evidence
 */
 
@@ -723,7 +797,7 @@ CROSS APPLY
             CASE
                 WHEN E.ScenarioCode = 'GOVERNANCE_SUSPENSION'
                     THEN 'ACME_CUSTOMER_SERVICE_AI'
-                ELSE 'ACME_ACCOUNTS_RECEIVABLE_AI'
+                ELSE 'AIAF_APPROVED_TEST'
             END
         ),
         CONVERT(NVARCHAR(4000), A.ApplicationCode)
@@ -733,7 +807,11 @@ CROSS APPLY
         CASE
             WHEN E.ScenarioCode = 'UNRECOGNIZED_IDENTITY'
                 THEN 'Jeannine'
-            ELSE 'jeannine@acme.example'
+            WHEN E.ScenarioCode IN ('UNAUTHORIZED_CUSTOMER', 'PROMPT_INJECTION', 'PROMPT_INJECTION_AUTHORIZATION')
+                THEN 'aiaf-unauthorized-test-user'
+            WHEN E.ScenarioCode = 'EXPIRED_CUSTOMER_ACCESS'
+                THEN 'aiaf-expired-test-user'
+            ELSE 'aiaf-functional-test-user'
         END,
         A.RequestingIdentity
     ),
@@ -744,6 +822,10 @@ CROSS APPLY
                 THEN NULL
             WHEN E.ScenarioCode = 'MODEL_UNAVAILABLE'
                 THEN 'NOT_EVALUATED'
+            WHEN E.ScenarioCode IN (
+                'MALFORMED_MODEL_JSON', 'UNSUPPORTED_MODEL_TOOL',
+                'MISSING_MODEL_ARGUMENT', 'PROMPT_INJECTION')
+                THEN 'FAILED'
             ELSE 'PASSED'
         END,
         A.ModelResponseValidationDecision
@@ -812,9 +894,7 @@ CROSS APPLY
                 THEN NULL
             WHEN E.ScenarioCode = 'UNSUPPORTED_REQUEST'
                 THEN ''
-            WHEN E.ScenarioCode = 'UNAUTHORIZED_CUSTOMER'
-                THEN 'CUST-1003'
-            ELSE 'CUST-1001'
+            ELSE 'CUST-0001'
         END,
         JSON_VALUE(A.RequestArguments, '$.CustomerCode')
     ),
@@ -1149,7 +1229,7 @@ CROSS APPLY
     ),
     (
         'MODEL_PROMPT_VERSION',
-        '1',
+        '2',
         CONVERT(VARCHAR(20), M.PromptVersion)
     ),
     (
@@ -1341,8 +1421,7 @@ CROSS JOIN
         ('DISPUTED_BALANCE_FIELD', '"DisputedBalance"'),
         ('OPEN_INVOICE_COUNT_FIELD', '"OpenInvoiceCount"'),
         ('DISPUTED_INVOICE_COUNT_FIELD', '"DisputedInvoiceCount"'),
-        ('AUTHORIZED_CUSTOMER_NAME', 'Northwind Industrial'),
-        ('UNAUTHORIZED_CUSTOMER_NAME', 'Fabrikam Logistics'),
+        ('SYNTHETIC_CUSTOMER_NAME', 'AIAF Functional Test Customer'),
         ('DDL_REQUEST', 'DROP TABLE acme.Customer')
 ) AS P
 (
@@ -1441,6 +1520,7 @@ SELECT
 
     CASE
         WHEN @RunId IS NOT NULL
+            AND @ExpectedScenarios = 17
             AND @VerificationFailures = 0
             AND @PassedScenarios = @ExpectedScenarios
             THEN 'PASS'
@@ -1452,7 +1532,7 @@ SELECT
     Fail explicitly for automation and CI/CD.
 */
 
-IF @RunId IS NULL OR @VerificationFailures > 0
+IF @RunId IS NULL OR @ExpectedScenarios <> 17 OR @VerificationFailures > 0
     OR @PassedScenarios <> @ExpectedScenarios
 BEGIN
     THROW 52500,

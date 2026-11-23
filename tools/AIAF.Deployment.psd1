@@ -134,6 +134,7 @@
                 '06_procedures\aiaf.usp_RecordModelToolRequest.sql'
                 '06_procedures\aiaf_tool.GetCustomerBalance.sql'
                 '06_procedures\aiaf.usp_RecordOutputValidation.sql'
+				'06_procedures\aiaf.usp_FailInteraction.sql'
                 '06_procedures\aiaf.usp_CompleteInteraction.sql'
                 '06_procedures\aiaf_governance.usp_FreezeReview.sql'
                 '06_procedures\aiaf_governance.usp_AttestReview.sql'
@@ -193,5 +194,13 @@
                 '90_validation\003_verify_effective_permissions.sql'
             )
         }
+
+		@{
+			Name = 'Seed integration test fixtures'
+			Modes = @('IntegrationTest')
+			Scripts = @(
+				'90_validation\004_seed_integration_fixtures.sql'
+			)
+		}
     )
 }
