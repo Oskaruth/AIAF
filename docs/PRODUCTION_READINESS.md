@@ -1,29 +1,33 @@
-# AIAF — Production readiness considerations
+# AIAF — Production Readiness Considerations
 
-**Status:** Development reference implementation; not approved for production deployment.  
-**Assessment basis:** Demonstrated SQL Server 2022 / Python / Ollama lab as of 2026-11-15.  
-**Companion:** [Reference architecture](ARCHITECTURE.md).
+**Status:** Validated development reference implementation; **not approved or certified for production deployment**.
+**Assessment basis:** Original SQL Server 2022 / Python / Ollama laboratory assessment (November 15, 2026), supplemented by the canonical-installer clean-install and integration validation on November 23, 2026.
+**Companions:** [Reference architecture](ARCHITECTURE.md) · [Getting started](GETTING_STARTED.md) · [Testing and verification](TESTING.md)
 
 ## 1. Decision and scope
 
-The lab demonstrates a controlled read-only customer-balance workflow, runtime governance, model/tool separation, validation, audit evidence and ledger verification. It does not establish production security, compliance, availability or operational supportability. The following is a recommended deployment backlog; priorities are proposed, not an organizational risk acceptance decision.
+AIAF demonstrates a controlled, synthetic, read-only customer-balance workflow, governance before model execution, independent tool authorization, input/output validation, interaction lifecycle evidence, and SQL Server append-only ledger events. The current repository also has a manifest-driven, fresh-install deployment path with repeatable security and integration checks.
 
-**P0:** Required before production access to sensitive enterprise data. **P1:** Required for supported ongoing operation; complete before broad rollout or explicitly accept residual risk. **P2:** Conditional enhancement, required if the relevant capability is introduced.
+These results **do not establish production security, compliance, availability, or operational supportability**. This document is a proposed readiness backlog, not an organizational risk acceptance or authorization to process sensitive enterprise data.
+
+- **P0:** Required before production access to sensitive enterprise data.
+- **P1:** Required for supported ongoing operation; complete before broad rollout or explicitly accept residual risk through the appropriate governance process.
+- **P2:** Conditional enhancement required if the relevant capability is introduced.
 
 ## 2. Readiness register
 
-| ID | Priority | Lab limitation / risk | Recommended control | Suggested owner |
+| ID | Priority | Current limitation / risk | Recommended control | Suggested owner |
 |---|---|---|---|---|
 | PR-01 | P0 | Application and user identity asserted by harness; shared runtime can misattribute requests | Bind application and user claims to verified identity; prevent cross-interaction impersonation; use separate service principals | IAM / application engineering |
 | PR-02 | P0 | Runtime trusts caller-reported validation, model results and telemetry | Isolate trusted validator/executor; authenticate service boundaries; bind evidence to request and tool result; reconcile independent receipts | Security architecture |
-| PR-03 | P0 | Governance gate lacks expiry, pending-review policy and continuous revocation enforcement | Define approval validity, condition evaluation, fail-closed policy and release-time revocation behavior | Governance / security |
+| PR-03 | P0 | Governance gate lacks a complete production policy for expiry, pending review and continuous revocation enforcement | Define approval validity, condition evaluation, fail-closed policy and release-time revocation behavior | Governance / security |
 | PR-04 | P0 | Customer access is evaluated at tool execution; revocation may race with release | Define authorization linearization point, recheck where required, test concurrent revocation, tenant and field-level scope | Data security |
 | PR-05 | P0 | Regex sanitization covers only limited patterns; synthetic directory is supplied to model | Classify data, minimize context, authorize retrieval, deploy tested DLP and provider boundary controls | Privacy / data governance |
 | PR-06 | P0 | Output rules validate shape and consistency, not all sensitive content or source truth; raw results enter Python memory | Treat runtime as sensitive boundary; minimize tool projection, validate semantics, restrict egress, test free-text leakage | Application / data owner |
 | PR-07 | P0 | Digest export is local, not independently protected; other tables are mutable | Independent immutable checkpoint storage, separate admin roles, periodic verification and reconciliation of nonledger records | Security operations / DBA |
-| PR-08 | P0 | Development impersonation, broad trusted login and TrustServerCertificate=yes | Dedicated least-privilege identities; validated TLS; secret management; procedure permission review and hardened hosts | Platform / DBA |
-| PR-09 | P0 | Unhandled exceptions and interrupted steps can leave nonterminal interactions; evidence persistence can fail | Durable lifecycle recovery, bounded retries, timeout and cancellation policy, fail closed on evidence failure | Application / SRE |
-| PR-10 | P0 | Fault injection and diagnostic output present in development code | Separate test entry points and deployable package; prohibit fault controls in production; sanitize logs | DevSecOps |
+| PR-08 | P0 | Development impersonation and lab certificate-trust exceptions are not production authentication | Dedicated least-privilege identities; validated TLS; secret management; procedure permission review and hardened hosts | Platform / DBA |
+| PR-09 | P0 | Interrupted steps can leave nonterminal interactions; evidence persistence can fail | Durable lifecycle recovery, bounded retries, timeout and cancellation policy, fail closed on evidence failure | Application / SRE |
+| PR-10 | P0 | Fault injection and diagnostic facilities exist for development | Separate test entry points and deployable package; prohibit fault controls in production; sanitize logs | DevSecOps |
 | PR-11 | P1 | No delivery receipt or exactly-once guarantee | Define release versus delivery; idempotency, durable delivery receipts if needed, retry and disconnect behavior | Application / SRE |
 | PR-12 | P1 | Model version not pinned in recorded live metadata; prompt version integer only | Artifact digest, model/config inventory, versioned prompts and policies, controlled deployment and reproducibility evidence | MLOps |
 | PR-13 | P1 | Absent billing and partial usage telemetry | Provider reconciliation, cost basis/version, coverage measures, budget alerts and missing-data reporting | FinOps |
@@ -33,7 +37,9 @@ The lab demonstrates a controlled read-only customer-balance workflow, runtime g
 | PR-17 | P1 | No validated HA, restore, capacity or disaster-recovery objectives | Load and concurrency tests; restore and ledger verification drills; RPO/RTO, patching and availability design | Platform / DBA |
 | PR-18 | P1 | Some rejected procedure calls throw without independent rejection evidence | Record security failures through protected monitoring; reconcile attempted and persisted operations | Security operations |
 | PR-19 | P2 | Financial writes not implemented | Separate action entitlement, human approval bound to canonical payload hash, expiry, concurrency, idempotency and uncertain-outcome reconciliation | Business owner / security |
-| PR-20 | P1 | No complete software supply-chain or deployment assessment | Pin dependencies, scan packages/images, review code and migrations, manage SBOM and rollback | DevSecOps |
+| PR-20 | P1 | Clean-install testing exists, but full software supply-chain, upgrade, rollback and release assessments have not been completed | Pin dependencies, scan packages/images, review code and migrations, manage SBOM; design and test upgrades and rollback | DevSecOps |
+
+**Interpretation:** The November 23 deployment checks are meaningful progress on fresh-install reliability and database permissions. They do **not** close PR-08 or PR-20, and the successful audit-write-failure scenario does **not** establish the durable crash recovery required by PR-09. Do not mark any readiness item closed without control-specific evidence and approval.
 
 ## 3. Trust boundaries and threat model
 
@@ -69,9 +75,13 @@ Define explicit failure paths for input validation errors, unavailable database,
 
 Monitor terminal outcomes, reasons, stale PROCESSING interactions, latency percentiles, provider failures, rule detections, denied-tool bursts, drift and evidence gaps. A blocked request is not automatically an outage. Validate monitoring independently of the system being monitored. Track token and monetary coverage separately; reconcile provider billing and distinguish reported costs from estimates. Exclude lab/test activity from production reporting and avoid documenting elapsed retrospective test intervals as actual processing latency.
 
+### Deployment and change management
+
+The canonical entry point is `tools/Install-AIAF.ps1`, with script inventory and ordering defined by `tools/AIAF.Deployment.psd1`. The installer supports fresh installation into an existing, empty database and the `Core`, `Demo`, and `IntegrationTest` modes. `IntegrationTest` fixtures and principals must remain confined to isolated test environments. The installer is not an in-place upgrade mechanism, and a partially failed installation is not automatically rolled back. Before production adoption, define controlled artifact promotion, versioned database changes, rollback/recovery procedures, release approvals and post-deployment verification.
+
 ## 5. Production acceptance tests
 
-These are proposed acceptance criteria, not tests claimed to have been executed by the lab.
+These are proposed acceptance criteria, **not** tests claimed to have been completed by the November 23 lab.
 
 | Test | Passing condition |
 |---|---|
@@ -88,6 +98,7 @@ These are proposed acceptance criteria, not tests claimed to have been executed 
 | Privilege and configuration review | No direct unauthorized data access, no production test hooks, validated TLS |
 | Capacity and recovery | Agreed workload SLOs, RPO/RTO and restore tests meet business requirements |
 | Cost and reporting | Known/unknown coverage accurate; test activity excluded; billing reconciled |
+| Controlled release and upgrade | Versioned artifacts, safe schema change, rollback/recovery and post-deployment verification |
 | Financial writes (only if enabled) | Approved payload binding, segregation, expiry and uncertain-outcome recovery tested |
 
 ## 6. Rollout and sign-off
@@ -100,8 +111,30 @@ These are proposed acceptance criteria, not tests claimed to have been executed 
 
 Suggested sign-off participants: accountable business owner, data owner, security/IAM, privacy/legal as applicable, platform/DBA, application owner, operations and FinOps. Record evidence references, finding owners, deadlines and explicit residual-risk decisions. No sign-off is implied by completion of this document.
 
-## 7. Lab evidence caveats
+## 7. Validated development evidence and caveats
 
-The nine final scenarios matched their expected outcomes; original digest verification returned block 0 and an altered digest was rejected. This does not establish coverage against arbitrary attacks. Earlier interactions include synthetic/replay telemetry, manual evidence, retrospective completion and deliberate faults. Interaction 1096 illustrates an abandoned PROCESSING request after a pipeline error. Preserve such records; annotate or classify them rather than silently rewriting history. The lab has not demonstrated independent authenticated receipts, immutable external storage, full DLP, concurrent revocation, production-scale operation or recovery. Repository source was not independently inspected for this assessment.
+### Historical laboratory evidence — November 15, 2026
 
-> Security isn't what you've designed. It's what you've actually deployed and verified.
+The original incremental laboratory assessment reported nine scenarios matching expected outcomes and a ledger-digest demonstration in which the original checkpoint verified and a modified checkpoint was rejected. It also documented an abandoned `PROCESSING` interaction following a pipeline error. These remain historical observations, not evidence of production crash recovery or independent digest custody.
+
+### Clean-install and integration evidence — November 23, 2026
+
+A fresh `IntegrationTest` deployment into `AIAF_CleanInstallTest` on SQL Server 2022 compatibility level 160 produced:
+
+| Verification | Observed result |
+|---|---:|
+| Installer preflight | 20/20 passed |
+| Manifest deployment scripts | 76/76 completed |
+| Installer security checks | 9/9 passed |
+| Effective database permission checks | 54/54 passed |
+| Python integration scenarios | 17/17 passed |
+| Independent SQL scenario verification | 17/17 passed |
+| SQL verification assertion failures | 0 |
+| Ledger events recorded for the verified run | 108 |
+| Persisted validation content records | 0 |
+
+The installer also refused a subsequent `-PlanOnly` attempt against the already populated AIAF database. The SQL evidence verifier automatically identified the most recent discoverable integration RunId. The 17-scenario suite includes deliberately blocked requests and failure paths; a PASS means **expected behavior**, not that all requests returned data.
+
+These tests do not prove arbitrary prompt-injection resistance, exhaustive data-loss prevention, independently protected ledger digests, cross-tenant isolation, production-scale operation, high availability, complete supply-chain assurance, or recovery of abandoned interactions. Source/deployment parity beyond the validated deployment inventory has not been established by this testing alone. Consult [Testing and Verification](TESTING.md) for scope and reproducibility details.
+
+> **Security isn't what you've designed. It's what you've actually deployed and verified.**

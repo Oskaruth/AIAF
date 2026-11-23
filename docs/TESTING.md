@@ -68,7 +68,7 @@ The application does not require access to the testing framework during normal e
 The reference implementation requires:
 
 - SQL Server 2022 or later.
-- A deployed AIAF database.
+- A fresh AIAF database deployed with `tools/Install-AIAF.ps1 -Mode IntegrationTest` (synthetic fixtures required).
 - A supported Python environment.
 - The pyodbc Python package.
 - Microsoft ODBC Driver 18 for SQL Server.
@@ -145,7 +145,7 @@ Execute the unit test suite:
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-The initial validated release contains 103 unit tests covering seven application components.
+The November 16 reference execution recorded 103 unit tests covering seven application components. Rerun the suite against the current checkout; this historical count is not a claim that all subsequent changes have been retested.
 
 | Component | Test Coverage Area |
 |---|---|
@@ -182,9 +182,9 @@ Database security testing should verify:
 - Absence of database owner privileges.
 - Correct assignment of runtime role membership.
 
-The original laboratory implementation passed 20 effective permission checks and one restricted Python database connection check.
+The November 23, 2026 clean-install validation passed **9/9 installer security checks** and **54/54 effective permission checks**. These are validated results for that deployment, not a guarantee for every environment. The installer also completed 76/76 manifest-selected scripts in `IntegrationTest` mode.
 
-The repeatable database security verification scripts will be incorporated into the deployment testing package.
+Use the canonical installer for database deployment. Do not use the retired `Install-AIAFDatabase.ps1` or `Test-AIAFDatabase.ps1` scripts. See [Getting Started](GETTING_STARTED.md) for preparation, `-PlanOnly`, and deployment instructions.
 
 ### Laboratory Runtime Identity
 
@@ -208,22 +208,29 @@ This allows the persisted evidence for a specific test run to be independently r
 
 ### Integration Scenarios
 
-| Scenario | Expected Interaction Status | Expected Completion Reason |
+The current suite contains **17 scenarios**. The first ten retain their documented expected terminal states; the additional seven extend failure handling, authorization, and prompt-injection coverage. For exact current assertions, the test runner and independent SQL verifier are authoritative.
+
+| Scenario | Behavior being tested | Expected terminal state where documented |
 |---|---|---|
-| AUTHORIZED_CUSTOMER | COMPLETED | OUTPUT_APPROVED_FOR_RELEASE |
-| UNRECOGNIZED_IDENTITY | BLOCKED | TOOL_AUTHORIZATION_DENIED |
-| UNAUTHORIZED_CUSTOMER | BLOCKED | TOOL_AUTHORIZATION_DENIED |
-| SENSITIVE_INPUT | COMPLETED | OUTPUT_APPROVED_FOR_RELEASE |
-| UNSUPPORTED_REQUEST | BLOCKED | NO_SUPPORTED_TOOL |
-| UNEXPECTED_COLUMN | BLOCKED | OUTPUT_VALIDATION_BLOCKED |
-| INCORRECT_CUSTOMER | BLOCKED | OUTPUT_VALIDATION_BLOCKED |
-| INVALID_FINANCIAL_BALANCE | BLOCKED | OUTPUT_VALIDATION_BLOCKED |
-| MODEL_UNAVAILABLE | FAILED | MODEL_EXECUTION_FAILED |
-| GOVERNANCE_SUSPENSION | BLOCKED | GOVERNANCE_SUSPENDED |
+| AUTHORIZED_CUSTOMER | Authorized customer balance request | COMPLETED |
+| UNRECOGNIZED_IDENTITY | Unknown requesting identity | BLOCKED |
+| UNAUTHORIZED_CUSTOMER | Customer entitlement denied | BLOCKED |
+| SENSITIVE_INPUT | Input detection and sanitization | COMPLETED |
+| UNSUPPORTED_REQUEST | Unsupported tool request | BLOCKED |
+| UNEXPECTED_COLUMN | Unexpected sensitive output field | BLOCKED |
+| INCORRECT_CUSTOMER | Output belongs to wrong customer | BLOCKED |
+| INVALID_FINANCIAL_BALANCE | Invalid financial results | BLOCKED |
+| MODEL_UNAVAILABLE | Model endpoint unavailable | FAILED |
+| GOVERNANCE_SUSPENSION | Governance gate blocks execution | BLOCKED |
+| AUDIT_WRITE_FAILURE | Failure to persist required audit evidence | See test assertions |
+| EXPIRED_CUSTOMER_ACCESS | Expired customer authorization | See test assertions |
+| MALFORMED_MODEL_JSON | Invalid model response structure | See test assertions |
+| UNSUPPORTED_MODEL_TOOL | Model proposes an unsupported tool | See test assertions |
+| MISSING_MODEL_ARGUMENT | Model omits a required tool argument | See test assertions |
+| PROMPT_INJECTION | Prompt-injection attempt | See test assertions |
+| PROMPT_INJECTION_AUTHORIZATION | Prompt injection attempts to bypass authorization | See test assertions |
 
-An interaction with a status of BLOCKED or FAILED may represent a successful integration test.
-
-The test evaluates whether the system behaved as expected, not whether the AI successfully returned information.
+A `BLOCKED` or `FAILED` interaction can be a **passing test** when that is the expected safe outcome. The suite evaluates architectural behavior, not whether the model produced an answer.
 
 ### Fault Injection
 
@@ -244,7 +251,7 @@ Fault injection is implemented exclusively within the testing framework.
 ### Expected Integration Summary
 
 ```text
-PASSED: 10/10
+PASSED: 17/17
 FAILED: 0
 RUN ID: <generated-run-id>
 INDEPENDENT SQL VERIFICATION: PENDING
@@ -258,7 +265,7 @@ In PowerShell, inspect the exit code immediately after execution:
 $LASTEXITCODE
 ```
 
-Retain the generated Run ID for independent evidence verification.
+Retain the generated Run ID if you want to verify that specific execution. The SQL verifier also supports automatic selection of the newest identifiable run.
 
 ## 9. Independent SQL Evidence Verification
 
@@ -268,12 +275,15 @@ Open the following script in SQL Server Management Studio:
 tests/integration/verify_integration_results.sql
 ```
 
-Set the Run ID to the value generated by the integration test runner:
+By default, the script starts with:
 
 ```sql
-DECLARE @RunId UNIQUEIDENTIFIER =
-    '<generated-run-id>';
+DECLARE @RunId UNIQUEIDENTIFIER = NULL; -- NULL = newest identifiable run
 ```
+
+Leave this as `NULL` to automatically select the latest identifiable integration run in the target database. The verifier reports `SelectedRunId` and `SelectionMethod` (`AUTOMATIC` or `EXPLICIT`). To check a particular run, set `@RunId` to the GUID reported by the Python runner.
+
+**Important:** Automatic selection does not search for the most recent *passing* run; it selects the latest identifiable run, even if incomplete or failing. A run that created no interactions cannot be discovered from interaction evidence alone. If no identifiable run exists, verification fails rather than passing vacuously.
 
 Execute the complete script against the same database used for integration testing under an authorized verification identity.
 
@@ -302,73 +312,48 @@ The independent verifier evaluates:
 
 ### Expected Aggregate Evidence
 
-A successful execution of the ten-scenario integration suite is expected to produce:
+The following counts were observed in the **November 23, 2026** clean-install `IntegrationTest` run. They are a reference baseline for the current 17-scenario suite, not a universal guarantee for modified tests or model configurations.
 
-| Evidence Type | Expected Count |
+| Evidence type | Observed count |
 |---|---:|
-| Interactions | 10 |
-| Input validation records | 27 |
-| Model executions | 9 |
-| Model tool requests | 8 |
-| Tool calls | 7 |
-| Output validation records | 25 |
-| Ledger events | 67 |
-| **Total persisted evidence records** | **153** |
-
-Additional expected metrics:
-
-| Metric | Expected Count |
-|---|---:|
+| Interactions / scenarios | 17 |
+| Input validation records | 48 |
 | Input detections | 1 |
+| Model executions | 16 |
+| Model tool requests | 11 |
+| Tool calls | 10 |
+| Output validation records | 25 |
 | Output detections | 5 |
+| Ledger events | 108 |
 | Persisted validation content records | 0 |
 
-Detection counts are attributes of validation records and are not additional persisted evidence records.
+Detection counts are attributes of validation records, not separate records. The independent verifier evaluates scenario-specific evidence, so aggregate totals alone do not establish success.
 
 ### Expected Final Verification Results
 
-| Metric | Expected Result |
-|---|---|
-| ExpectedScenarios | 10 |
-| PassedScenarios | 10 |
+| Metric | Validated result |
+|---|---:|
+| ExpectedScenarios | 17 |
+| PassedScenarios | 17 |
 | FailedScenarios | 0 |
 | VerificationFailures | 0 |
 | VerificationStatus | PASS |
 
-Successful verification produces the following message:
+Successful verification prints:
 
 ```text
 AIAF independent integration verification PASSED.
 ```
 
-If verification fails, the script returns assertion-level failure details and raises SQL Server error 52500.
-
-A missing Run ID or missing interaction evidence must never produce a successful verification result.
+Assertion failures raise SQL Server error **52500**. If no identifiable run exists, the automatic-selection guard raises **52501**. A missing run or missing interaction evidence must never be treated as a pass.
 
 ## 10. Validated Reference Execution
 
-The consolidated integration suite was successfully executed and independently verified on November 16, 2026.
+On **November 23, 2026**, a clean SQL Server 2022 `IntegrationTest` installation on `AIAF_CleanInstallTest` completed **76/76 deployment scripts**, **9/9 security checks**, and **54/54 effective permission checks**. The Python integration runner passed **17/17 scenarios**, and independent SQL evidence verification passed **17/17**, with **zero assertion failures**. The selected Run ID was `3d0952c5-0deb-4767-985b-a479466afee5`.
 
-| Metric | Validated Result |
-|---|---:|
-| Python unit tests | 103 |
-| Live application integration tests passed | 10 of 10 |
-| Independently verified integration scenarios | 10 of 10 |
-| Persisted evidence records | 153 |
-| Verification failures | 0 |
-| Persisted validation content records | 0 |
+A prior November 16 reference run recorded **103 Python unit tests**. That is a separate historical result, not a claim that unit tests were rerun during the November 23 installer validation.
 
-The ten integration scenarios resulted in:
-
-- Two interactions completed and approved for response release.
-- Seven interactions blocked.
-- One interaction failed safely.
-
-Five interactions successfully retrieved authorized customer information.
-
-Three of those five interactions were subsequently blocked by independent output validation.
-
-This demonstrates the architectural distinction between authorization to retrieve information and authorization to release information.
+These results demonstrate repeatable development-lab installation and evidence verification. They do **not** certify the framework for production use. In particular, verification of ledger event sequences is not cryptographic verification of database ledger integrity against an independently retained digest.
 
 ## 11. Troubleshooting
 
