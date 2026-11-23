@@ -1,7 +1,7 @@
 # AI Interaction Audit Framework (AIAF)
 ## Reference architecture
 
-**Status:** Validated development proof of concept | **Reference implementation:** SQL Server 2022, Python, Ollama | **Validation date:** 2026-11-15
+**Status:** Validated development proof of concept; implementation inventory refreshed 2026-11-18 | **Original reference implementation:** SQL Server 2022, Python, Ollama | **Current inspected deployment:** SQL Server 2025, `AIAF_EmptyTest` on `btg-kwilkie` | **Historical validation date:** 2026-11-15
 
 > The AI provides intelligence. The architecture provides control.
 
@@ -155,7 +155,7 @@ Capture provider/model, prompt version, timestamps, client and server timings, l
 
 The lab verified block 0 and showed that a deliberately altered supplied hash is rejected (errors 37368 and 37392). This is a digest mismatch test, not an actual database tampering experiment. Only ledger-protected events receive this protection; ordinary framework tables do not. Ledger integrity does not prove event truth, completeness or confidentiality. External local file storage is not an independently protected immutable trust boundary.
 
-## 10. Demonstrated results
+## 10. Historical demonstrated results (2026-11-15)
 
 Final inventory from the development database on 2026-11-15 (includes earlier-series fixtures and intermediate tests):
 
@@ -189,8 +189,96 @@ Final end-to-end scenarios:
 
 Nine scenarios matched expected outcomes; no unauthorized financial response was observed in these tests. This is not a statistical security guarantee. Earlier manual validation (1085), retrospective finalization (1089–1095), deliberate faults (1093–1095, 1101–1103), and abandoned interaction 1096 must be distinguished from normal operations. Historical fixtures should not be used as production performance or security metrics.
 
-## 11. Related documentation
+## 11. Current deployed implementation reference (2026-11-18)
 
-See [Production readiness considerations](PRODUCTION_READINESS.md) for deployment gaps and acceptance criteria. This document reflects the observed lab and established design, not a fresh repository source-code audit.
+This section supplements the original architecture and its **2026-11-15 historical proof-of-concept results**. The new inventory comes from deployed SQL Server metadata, SSMS-generated procedure definitions, and uploaded Python and integration-test sources. **Source inspection is not equivalent to executing the full test suite.** The SQL Server 2022 reference in the original lab and the SQL Server 2025 inspected deployment are different snapshots, not interchangeable validation environments.
+
+### 11.1 Deployed database inventory
+
+**16 tables** across three schemas (an earlier conversational count of 17 was incorrect):
+
+| Schema | Tables |
+|---|---|
+| `acme` (2) | `Customer`, `Invoice` |
+| `aiaf` (10) | `AIApplication`, `AIAuditHeartbeat`, `AICustomerAccess`, `AIDriftRule`, `AIInteraction`, `AIInteractionEvent`, `AIModelExecution`, `AIModelToolRequest`, `AIToolCall`, `AIValidation` |
+| `aiaf_governance` (4) | `AIReview`, `AIReviewAction`, `AIReviewAttestation`, `AIReviewItem` |
+
+The metadata inventory contains **14 declared foreign keys**, all reported enabled and trusted. These link customer/invoice/access; application/interaction; interaction/model execution/tool proposal/tool call/validation/event; and governance review/items/actions/attestations. Reviews associate with applications by application code rather than a declared review-to-application foreign key. The inventory recorded **164 column definitions**.
+
+`AIInteraction` has exactly these ten columns: `InteractionId`, `RequestingIdentity`, `WorkflowCode`, `InteractionAt`, `ExperimentPeriod`, `ApplicationId`, `CorrelationId`, `BusinessPurpose`, `InteractionStatus`, `CompletedAt`. It does **not** have `ResponseDeliveryConfirmed` or `FinalDecisionCode` columns. `ResponseDeliveryConfirmed = false` is written in the **JSON event details** for `INTERACTION_FINALIZED`; this is not proof of actual response delivery.
+
+### 11.2 Deployed stored procedure contracts
+
+| Procedure | Parameters | Purpose |
+|---|---:|---|
+| `aiaf.usp_BeginInteraction` | 8 | Validate context, evaluate governance, register interaction and events |
+| `aiaf.usp_CompleteInteraction` | 1 | Derive final state from persisted evidence and record finalization |
+| `aiaf.usp_EvaluateGovernanceGate` | 7 | Check registered/enabled application, latest completed review attestation and evidence hash |
+| `aiaf.usp_RecordInputValidation` | 2 | Require three input-rule findings; transition `RECEIVED` to `PROCESSING` |
+| `aiaf.usp_RecordModelExecution` | 27 | Persist model execution, usage/cost telemetry and event |
+| `aiaf.usp_RecordModelToolRequest` | 4 | Persist validated model proposal and controlled arguments |
+| `aiaf.usp_RecordOutputValidation` | 3 | Require five output-rule findings and eligible tool execution |
+| `aiaf_governance.usp_AttestReview` | 6 | Validate frozen evidence/hash and attestation restrictions |
+| `aiaf_governance.usp_FreezeReview` | 1 | Freeze ordered review evidence package and compute SHA-256 hash |
+| `aiaf_tool.GetCustomerBalance` | 2 | Recheck governance, authorize customer read and record tool execution |
+
+**Total: 10 procedures and 61 parameters.** The generated SQL definitions, not `sys.parameters`, establish parameter defaults. `usp_RecordModelExecution` has optional telemetry fields, with `@CostBasis = 'UNAVAILABLE'` by default.
+
+The deployed workflow currently expects **exactly one live `TOOL_SELECTION` model execution** at completion. Model proposals are limited to `GetCustomerBalance` (customer code matching `CUST-` plus four digits) and `NO_SUPPORTED_TOOL`. A proposal does not authorize execution. `GetCustomerBalance` consumes the persisted proposal identifier and reevaluates the governance gate and customer entitlement before accessing financial data. `usp_CompleteInteraction` derives `COMPLETED`, `BLOCKED`, or `FAILED` from recorded evidence, and approves release only when all five output rules pass and the recorded tool returned one row.
+
+Input findings must cover version-1 `US_SSN_PATTERN`, `PAYMENT_CARD_PATTERN`, and `EMAIL_ADDRESS_PATTERN`. Output findings must cover version-1 `OUTPUT_AUTHORIZATION`, `OUTPUT_ROW_COUNT`, `OUTPUT_SCHEMA`, `OUTPUT_FINANCIAL_INTEGRITY`, and `OUTPUT_CUSTOMER_BINDING`. SQL validates the shape and consistency of reported findings; it does not independently reproduce every Python-side content check. The procedures use individual SQL transactions; the entire Python pipeline is **not** one atomic database transaction.
+
+### 11.3 Explicit runtime permissions
+
+The `AIAF_Runtime` database role has object-level `EXECUTE` grants on:
+
+- `aiaf.usp_BeginInteraction`, `aiaf.usp_CompleteInteraction`, `aiaf.usp_RecordInputValidation`, `aiaf.usp_RecordModelExecution`, `aiaf.usp_RecordModelToolRequest`, `aiaf.usp_RecordOutputValidation`.
+- `aiaf_tool.GetCustomerBalance`.
+
+The role has schema-level `DENY` for `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on `acme`, `aiaf`, and `aiaf_governance`; `EXECUTE` is additionally denied on `aiaf_governance`. `aiaf.usp_EvaluateGovernanceGate` is invoked internally rather than directly granted to the runtime role. This is an **explicit-permissions inventory**, not a complete proof of effective permissions, impersonation behavior, or ownership chaining. Runtime identity authentication remains a separate production concern.
+
+### 11.4 Python-to-SQL execution mapping
+
+| Python module | SQL entry point or responsibility |
+|---|---|
+| `pipeline.py` | Orchestrates `process_request`, evidence reconciliation and rejection handling |
+| `database.py` | Builds SQL connection and connects to the configured database |
+| `input_validation.py` | Sanitizes request and calls `aiaf.usp_RecordInputValidation` |
+| `model_client.py` | Calls Ollama for constrained JSON tool selection and captures telemetry |
+| `tool_dispatcher.py` | Calls `aiaf.usp_RecordModelToolRequest` and `aiaf_tool.GetCustomerBalance` |
+| `output_validation.py` | Evaluates five output rules and calls `aiaf.usp_RecordOutputValidation` |
+| `interaction_lifecycle.py` | Calls `aiaf.usp_CompleteInteraction` |
+| `response_formatter.py` | Deterministically formats approved results or safe rejection messages |
+
+The inspected model client uses Ollama `qwen3:8b`, prompt version 2, and a synthetic customer directory supplied by configuration. The model selects a supported tool proposal; it never receives raw financial tool results for response generation. Unexpected application errors are converted to generic rejections for the caller; this alone does not guarantee a finalized SQL interaction.
+
+## 12. Current testing status, differences and next verification
+
+### 12.1 Separate the two evidence snapshots
+
+| Evidence | Environment / date | Supported conclusion |
+|---|---|---|
+| Historical nine end-to-end scenarios (Section 10) | Original development lab, 2026-11-15 | Nine reported scenarios matched expected outcomes **in that earlier environment** |
+| New `AUTHORIZED_CUSTOMER` live integration run | `AIAF_EmptyTest`, 2026-11-18 | One authorized customer request passed with persisted model, tool and validation evidence |
+| Uploaded Python unit/integration sources | Source review, 2026-11-18 | Test cases exist; no full-suite pass is established by source inspection |
+
+The newer authorized scenario used run ID `91aee6c8-3595-4128-9653-d1fd8851e0d3`, `InteractionId = 4`, `ModelExecutionId = 3`, `ModelToolRequestId = 2`, and `AIToolCallId = 2`. The live Ollama tool selection succeeded; the SQL tool returned the expected synthetic balance; eight validation records passed (three input, five output). These IDs and outcomes belong to the new test database and must **not** be mixed with historical interaction IDs 1097–1105.
+
+### 12.2 Test suite and known gaps
+
+The uploaded integration runner defines **ten scenarios**: `AUTHORIZED_CUSTOMER`, `UNRECOGNIZED_IDENTITY`, `UNAUTHORIZED_CUSTOMER`, `SENSITIVE_INPUT`, `UNSUPPORTED_REQUEST`, `UNEXPECTED_COLUMN`, `INCORRECT_CUSTOMER`, `INVALID_FINANCIAL_BALANCE`, `MODEL_UNAVAILABLE`, and `GOVERNANCE_SUSPENSION`. Only the first has been verified in the current fresh-database testing described here. Some remaining scenarios still reference older `ACME_CUSTOMER_SERVICE_AI`, `CUST-1001`, or `CUST-1003` fixtures; reconcile their expected semantics and the SQL verifier before running the suite.
+
+**Open verification and hardening items:**
+
+1. Compare the deployed SQL definitions with version-controlled database scripts; repository/deployment parity is not yet established.
+2. Verify effective runtime permissions and denied direct access with impersonation tests, in addition to the explicit permission inventory.
+3. Align integration fixtures, then run and inspect the full ten-scenario suite; do not infer a pass from the historical lab.
+4. Define recovery for abandoned/stuck `RECEIVED` or `PROCESSING` interactions as a production-hardening item, without changing the schema prematurely.
+5. Decide whether and how to track actual response delivery separately from SQL approval for release.
+6. Preserve the production-readiness caveats: application identity authentication, comprehensive DLP, independent digest anchoring, privacy controls, and broader negative-path coverage remain outside the verified proof of concept.
+
+## 13. Related documentation
+
+See [Production readiness considerations](PRODUCTION_READINESS.md) for deployment gaps and acceptance criteria. This document combines the historical observed lab and established design with a 2026-11-18 deployed SQL and uploaded Python source review. It is not a full repository-to-deployment parity audit or production certification.
 
 > Trust nothing. Test everything. Keep the receipts.
