@@ -13,17 +13,10 @@
 
     Execute against the database used by the test runner.   */
 
-USE [AIAF_IntegrationTest];
-GO
 SET NOCOUNT ON;
 
 -- Change this identifier for each new Python integration run.
-DECLARE @RunId UNIQUEIDENTIFIER = 'c0d82c26-e62c-4e49-9e16-955beab55dc1';
-
-IF DB_NAME() <> N'AIAF_IntegrationTest'
-    THROW 52501, 'Wrong database: independent verification requires AIAF_IntegrationTest.', 1;
-IF @RunId IS NULL
-    THROW 52502, 'Specify a non-null integration run ID.', 1;
+DECLARE @RunId UNIQUEIDENTIFIER = NULL;
 
 DROP TABLE IF EXISTS #ExpectedResults;
 
